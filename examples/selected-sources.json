@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "sources": [
+    {"guild_id": "700", "channel_id": "800"},
+    {"guild_id": "700", "channel_id": "801"}
+  ]
+}
