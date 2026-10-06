@@ -1,6 +1,6 @@
 {
   "name": "discord-research-mcp",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Read-only Discord research through authorized local RPC plus a provenance-aware local archive facade.",
   "license": "MIT",
   "type": "commonjs",

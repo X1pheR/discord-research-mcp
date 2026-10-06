@@ -228,12 +228,29 @@ class RestArchiveClient {
       res.end('msgvault unavailable');
       return;
     }
+    const upstreamAuthority = target.host + ':' + target.port;
+    const headers = { ...req.headers, host: upstreamAuthority };
+    if (headers.origin) headers.origin = 'http://' + upstreamAuthority;
+    if (headers.referer) {
+      try {
+        const referer = new URL(headers.referer);
+        referer.protocol = 'http:';
+        referer.host = upstreamAuthority;
+        headers.referer = referer.toString();
+      } catch {
+        delete headers.referer;
+      }
+    }
+    delete headers.forwarded;
+    delete headers['x-forwarded-host'];
+    delete headers['x-forwarded-proto'];
+    delete headers['x-forwarded-port'];
     const upstream = http.request({
       host: target.host,
       port: target.port,
       method: req.method,
       path: req.url,
-      headers: { ...req.headers, host: target.host + ':' + target.port },
+      headers,
     }, upstreamRes => {
       res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
       upstreamRes.pipe(res);

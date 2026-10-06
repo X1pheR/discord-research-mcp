@@ -60,7 +60,7 @@ An archive miss is terminal. It never falls back to Discord.
 The maintained container image is published on GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.3
+ghcr.io/x1pher/discord-research-mcp:v0.5.4
 ```
 
 A representative `compose.yaml` is included for the complete five-tool deployment using three runtime containers: combined Discord Research service, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
