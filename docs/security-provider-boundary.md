@@ -45,9 +45,9 @@ Access tokens remain process-memory only. Corrupt, insecure, rejected, or unpers
 The recommended topology is:
 
 1. the msgvault writer runs in a network-isolated namespace;
-2. a native msgvault read-only MCP helper shares that namespace and binds loopback only;
-3. archive-bridge shares the same namespace, calls that loopback endpoint, and exports only a Unix socket;
-4. the network-facing Discord MCP façade mounts the Unix socket but does not join the archive namespace.
+2. archive-bridge shares the same namespace and calls only the existing loopback msgvault REST API;
+3. archive-bridge exports bounded private Unix sockets for Discord archive queries and optional Web UI proxying;
+4. the network-facing Discord MCP façade mounts the archive Unix socket but does not join the archive namespace.
 
 This preserves a single archive writer and avoids giving the archive/query components Discord credentials or general network reachability.
 

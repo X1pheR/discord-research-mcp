@@ -6,13 +6,33 @@ The product is designed for evidence gathering, not account automation. It does 
 
 ## Architecture
 
-The same image can run three roles:
+The image supports three runtime roles. The reference deployment uses those roles across three Discord Research processes/containers plus the existing msgvault writer because they cross different credential and network boundaries.
+
+```mermaid
+flowchart LR
+    Desktop["Discord Desktop\nlocal IPC"] --> Collector["Discord collector\nforward role\nOAuth/RPC credentials"]
+    Collector -->|private live-read Unix socket| MCP["Discord Research MCP\nmcp role\nagent-facing"]
+    Collector -->|bounded JSONL observations| Vault["msgvault\nsole archive writer\nSQLite / FTS / Web UI"]
+
+    MCP -->|private archive Unix socket| Bridge["Archive bridge\narchive-bridge role"]
+    Bridge -->|loopback REST only| Vault
+    Bridge -->|private Web UI Unix socket| Caddy["Reverse proxy / browser auth"]
+    Caddy --> Web["msgvault Web UI"]
+
+    classDef external fill:#eee,stroke:#777,color:#111;
+    classDef discord fill:#e9eefc,stroke:#536dba,color:#111;
+    classDef archive fill:#eef7ee,stroke:#4d7c4d,color:#111;
+    class Desktop,Caddy,Web external;
+    class Collector,MCP,Bridge discord;
+    class Vault archive;
+```
 
 1. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
-2. **archive-bridge** connects only to the existing loopback msgvault REST API, republishes a curated archive-query subset over a private Unix socket, and can export the first-party msgvault Web UI/API over a second private Unix socket.
+2. **archive-bridge** joins msgvault's isolated network namespace, connects only to the existing loopback msgvault REST API, republishes a curated archive-query subset over a private Unix socket, and can export the first-party msgvault Web UI/API over a second private Unix socket.
 3. **mcp** exposes the agent-facing Discord tools. It has no Discord credentials and talks only to the two Unix sockets.
+4. **msgvault** remains a separate upstream/downstream product and the sole durable archive writer.
 
-Durable archive storage, SQLite/FTS query behavior, and single-writer ownership remain with msgvault. The archive bridge never opens the archive database directly.
+The container split is a deployment choice, not a product requirement. A deployment may combine the `forward` and `mcp` roles when it intentionally accepts that the agent-facing process then shares the collector's Discord credential/mount boundary. The reference deployment keeps them separate. Combining `archive-bridge` with the other Discord roles is not equivalent while msgvault remains `network_mode: none`, because the bridge must share msgvault's isolated network namespace.
 
 ## Agent tools
 
@@ -41,7 +61,7 @@ An archive miss is terminal. It never falls back to Discord.
 The maintained container image is published on GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.1
+ghcr.io/x1pher/discord-research-mcp:v0.5.2
 ```
 
 A representative `compose.yaml` is included for the complete five-tool deployment using four runtime containers: collector, Discord MCP façade, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
@@ -108,7 +128,7 @@ Forum-thread state is optional and configured with DISCORD_FORUM_THREAD_STATE_FI
 | DISCORD_SELECTION_FILE | Used to derive the allowed local archive source identifiers. |
 | DISCORD_MIRROR_CUTOFF | Optional evidence cutoff attached only to public-mirror results. |
 
-The intended deployment keeps the msgvault writer and its read-only MCP helper inside a network-isolated namespace. archive-bridge joins that same isolated namespace and exports only a Unix socket.
+The intended deployment keeps the msgvault writer network-isolated. `archive-bridge` joins that same namespace, talks to the existing loopback REST API, and exports only private Unix sockets.
 
 ### Agent MCP: mcp
 
