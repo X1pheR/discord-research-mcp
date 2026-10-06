@@ -215,7 +215,13 @@ async function main() {
   const command = process.argv[2] || 'help';
 
   if (command === 'help') {
-    console.log('commands: forward | mcp | archive-bridge | seed-forum-threads --guild-id ID --parent-id ID --input-file FILE | socket | authorize | guilds | channels --guild-id ID | channel --channel-id ID | observe-channel --channel-id ID --output FILE [--guild-id ID] | watch --channel-id ID [--seconds 60] | watch-observations --channel-id ID --output FILE [--guild-id ID] [--seconds 60]');
+    console.log('commands: serve | forward | mcp | archive-bridge | seed-forum-threads --guild-id ID --parent-id ID --input-file FILE | socket | authorize | guilds | channels --guild-id ID | channel --channel-id ID | observe-channel --channel-id ID --output FILE [--guild-id ID] | watch --channel-id ID [--seconds 60] | watch-observations --channel-id ID --output FILE [--guild-id ID] [--seconds 60]');
+    return;
+  }
+
+  if (command === 'serve') {
+    const {runCombined}=require('./combined');
+    await runCombined({scriptPath:__filename});
     return;
   }
 

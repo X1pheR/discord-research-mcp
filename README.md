@@ -6,15 +6,14 @@ The product is designed for evidence gathering, not account automation. It does 
 
 ## Architecture
 
-The image supports three runtime roles. The reference deployment uses those roles across three Discord Research processes/containers plus the existing msgvault writer because they cross different credential and network boundaries.
+The image supports three runtime roles. The reference deployment runs `forward` and `mcp` together through the supervised `serve` command in one Discord Research container, while `archive-bridge` stays separate because it must join msgvault's isolated network namespace. Together with msgvault, this yields three runtime containers.
 
 ```mermaid
 flowchart LR
-    Desktop["Discord Desktop\nlocal IPC"] --> Collector["Discord collector\nforward role\nOAuth/RPC credentials"]
-    Collector -->|private live-read Unix socket| MCP["Discord Research MCP\nmcp role\nagent-facing"]
-    Collector -->|bounded JSONL observations| Vault["msgvault\nsole archive writer\nSQLite / FTS / Web UI"]
+    Desktop["Discord Desktop\nlocal IPC"] --> Discord["discord-research\nserve = forward + mcp\nOAuth/RPC + agent-facing MCP"]
+    Discord -->|bounded JSONL observations| Vault["msgvault\nsole archive writer\nSQLite / FTS / Web UI"]
 
-    MCP -->|private archive Unix socket| Bridge["Archive bridge\narchive-bridge role"]
+    Discord -->|private archive Unix socket| Bridge["discord-archive-bridge\narchive-bridge role"]
     Bridge -->|loopback REST only| Vault
     Bridge -->|private Web UI Unix socket| Caddy["Reverse proxy / browser auth"]
     Caddy --> Web["msgvault Web UI"]
@@ -23,16 +22,16 @@ flowchart LR
     classDef discord fill:#e9eefc,stroke:#536dba,color:#111;
     classDef archive fill:#eef7ee,stroke:#4d7c4d,color:#111;
     class Desktop,Caddy,Web external;
-    class Collector,MCP,Bridge discord;
+    class Discord,Bridge discord;
     class Vault archive;
 ```
 
-1. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
+1. **serve** supervises the `forward` and `mcp` child processes in one container. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
 2. **archive-bridge** joins msgvault's isolated network namespace, connects only to the existing loopback msgvault REST API, republishes a curated archive-query subset over a private Unix socket, and can export the first-party msgvault Web UI/API over a second private Unix socket.
-3. **mcp** exposes the agent-facing Discord tools. It has no Discord credentials and talks only to the two Unix sockets.
+3. **mcp** exposes the agent-facing Discord tools and talks only to the two Unix sockets. In the reference deployment it shares the `discord-research` container with `forward` to avoid a redundant container boundary.
 4. **msgvault** remains a separate upstream/downstream product and the sole durable archive writer.
 
-The container split is a deployment choice, not a product requirement. A deployment may combine the `forward` and `mcp` roles when it intentionally accepts that the agent-facing process then shares the collector's Discord credential/mount boundary. The reference deployment keeps them separate. Combining `archive-bridge` with the other Discord roles is not equivalent while msgvault remains `network_mode: none`, because the bridge must share msgvault's isolated network namespace.
+The reference deployment deliberately combines `forward` and `mcp`; separating them is optional hardening, not required architecture. `archive-bridge` remains separate while msgvault uses `network_mode: none`, because it must share msgvault's isolated network namespace. Collapsing to two containers would therefore require weakening that isolation or introducing another cross-namespace transport, which is more complex than the boundary it removes.
 
 ## Agent tools
 
@@ -61,10 +60,10 @@ An archive miss is terminal. It never falls back to Discord.
 The maintained container image is published on GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.2
+ghcr.io/x1pher/discord-research-mcp:v0.5.3
 ```
 
-A representative `compose.yaml` is included for the complete five-tool deployment using four runtime containers: collector, Discord MCP façade, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
+A representative `compose.yaml` is included for the complete five-tool deployment using three runtime containers: combined Discord Research service, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
 
 ```sh
 cp .env.example .env
