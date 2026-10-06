@@ -36,6 +36,38 @@ Every result is explicit about what it proves.
 
 An archive miss is terminal. It never falls back to Discord.
 
+## Published container and Docker Compose
+
+The maintained container image is published on GitHub Container Registry:
+
+```text
+ghcr.io/x1pher/discord-research-mcp:v0.5.1
+```
+
+A representative `compose.yaml` is included for the complete five-tool deployment. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
+
+```sh
+cp .env.example .env
+# Edit .env and examples/selected-sources.json.
+docker compose --env-file .env config -q
+docker compose pull
+docker compose up -d
+```
+
+See [docs/docker-compose.md](docs/docker-compose.md) for prerequisites, tested compatibility, archive/import ownership, and security boundaries.
+
+## Tested compatibility
+
+| Component | Baseline |
+| --- | --- |
+| Container platform | Docker Engine + Docker Compose v2 on Linux |
+| Published image | `linux/amd64` |
+| Source/runtime | Node.js 22 |
+| Discord | Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |
+| Archive | msgvault `0.19.3-x1pher.7` read-only MCP against an existing writer/data directory |
+
+Other combinations may work but are not claimed as tested by this release.
+
 ## Requirements
 
 - A Discord Desktop client whose local IPC socket is available to the collector.

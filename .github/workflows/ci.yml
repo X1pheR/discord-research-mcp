@@ -17,7 +17,4 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm test
-      - run: python3 scripts/public-scrub.py
-      - run: docker build -t discord-research-mcp:ci .
+      - run: ./scripts/verify.sh

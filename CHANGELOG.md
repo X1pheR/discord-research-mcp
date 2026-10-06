@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.1
+
+Public packaging and documentation release.
+
+- Added a representative Docker Compose deployment for the complete five-tool surface using the published GHCR image.
+- Added `.env.example` and a deployment guide with explicit provider/archive trust boundaries.
+- Added the tested compatibility baseline and clarified that msgvault import/writer lifecycle remains deployment-owned.
+- Added Compose validation to the canonical verification path and hosted release checks.
+- No Discord acquisition, archive-query, tool-contract, or persistence semantics changed.
+
 ## v0.5.0
 
 First standalone Discord Research MCP release.
