@@ -2,9 +2,8 @@
 
 const fs = require('node:fs');
 const net = require('node:net');
+const http = require('node:http');
 const path = require('node:path');
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const Observations = require('./observations');
 
 const MAX_SOCKET_BYTES = 4 * 1024 * 1024;
@@ -50,50 +49,200 @@ function parseToolResult(result) {
   }
 }
 
-function validateArchiveURL(value) {
-  const url = new URL(value);
-  const loopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
-  if (url.protocol !== 'http:' || !loopback || url.pathname !== '/mcp') {
-    throw safeError('invalid_archive_backend');
-  }
-  return url;
+function resolveRuntimeTarget(runtimeFile) {
+  if (!path.isAbsolute(runtimeFile)) throw safeError('invalid_archive_backend');
+  const runtime = JSON.parse(fs.readFileSync(runtimeFile, 'utf8'));
+  const address = String(runtime.address || '');
+  if (!address.startsWith('127.0.0.1:')) throw safeError('invalid_archive_backend');
+  const portText = address.slice('127.0.0.1:'.length);
+  if (!/^[0-9]+$/.test(portText)) throw safeError('invalid_archive_backend');
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw safeError('invalid_archive_backend');
+  return { host: '127.0.0.1', port };
 }
 
-class NativeArchiveClient {
-  constructor(url) {
-    this.url = validateArchiveURL(url);
-    this.client = null;
-    this.transport = null;
+function requestJSON(target, pathname) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: target.host,
+      port: target.port,
+      method: 'GET',
+      path: pathname,
+      headers: { accept: 'application/json', host: target.host + ':' + target.port },
+    }, res => {
+      let raw = '';
+      let bytes = 0;
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        bytes += Buffer.byteLength(chunk);
+        if (bytes > MAX_SOCKET_BYTES) {
+          req.destroy();
+          reject(safeError('archive_response_too_large'));
+          return;
+        }
+        raw += chunk;
+      });
+      res.on('end', () => {
+        if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
+          reject(safeError('archive_query_failed'));
+          return;
+        }
+        try { resolve(JSON.parse(raw)); } catch { reject(safeError('invalid_archive_response')); }
+      });
+    });
+    req.setTimeout(30000, () => req.destroy(safeError('archive_unavailable')));
+    req.on('error', () => reject(safeError('archive_unavailable')));
+    req.end();
+  });
+}
+
+function firstAuthor(value) {
+  if (Array.isArray(value)) return value[0] || null;
+  if (value && typeof value === 'object') return value;
+  if (typeof value === 'string' && value) return { email: value, name: null };
+  return null;
+}
+
+class RestArchiveClient {
+  constructor(runtimeFile) {
+    this.runtimeFile = runtimeFile;
+    this.sourceMap = null;
   }
 
-  async connect() {
-    if (this.client) return this.client;
-    const client = new Client({ name: 'discord-research-archive-bridge', version: '0.5.1' });
-    const transport = new StreamableHTTPClientTransport(this.url);
-    await client.connect(transport);
-    this.client = client;
-    this.transport = transport;
-    return client;
+  target() {
+    return resolveRuntimeTarget(this.runtimeFile);
   }
 
-  async reset() {
-    const client = this.client;
-    this.client = null;
-    this.transport = null;
-    try { await client?.close(); } catch {}
+  async get(pathname, params = {}) {
+    const url = new URL('http://127.0.0.1' + pathname);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+    }
+    return requestJSON(this.target(), url.pathname + url.search);
+  }
+
+  async sources() {
+    const payload = await this.get('/api/v1/sources/status', { source_type: 'discord_local' });
+    const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+    this.sourceMap = new Map(sources.map(item => [String(item.identifier || ''), Number(item.id)]));
+    return sources;
+  }
+
+  async sourceId(identifier) {
+    if (!this.sourceMap) await this.sources();
+    const id = this.sourceMap.get(String(identifier));
+    if (!Number.isInteger(id) || id < 1) throw safeError('archive_scope_unavailable');
+    return id;
+  }
+
+  async detail(id) {
+    return this.get('/api/v1/messages/' + encodeURIComponent(String(id)));
   }
 
   async call(name, args) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const client = await this.connect();
-        return parseToolResult(await client.callTool({ name, arguments: args }));
-      } catch (error) {
-        await this.reset();
-        if (attempt === 1) throw safeError(error?.safeCode || 'archive_unavailable');
-      }
+    if (name === 'get_stats') {
+      const sources = await this.sources();
+      return {
+        accounts: sources.map(item => ({
+          ID: Number(item.id),
+          SourceType: item.source_type,
+          Identifier: String(item.identifier || ''),
+          DisplayName: item.display_name || null,
+        })),
+      };
     }
-    throw safeError('archive_unavailable');
+
+    if (name === 'search_message_bodies') {
+      const page = await this.get('/api/v1/search', {
+        q: args.query,
+        mode: 'fts',
+        page: 1,
+        page_size: Math.min(Number(args.limit || 50), 100),
+        message_type: 'discord',
+        account: args.account,
+      });
+      const data = Array.isArray(page?.messages) ? page.messages : [];
+      return { data, has_more: Number(page?.total || 0) > data.length };
+    }
+
+    if (name === 'get_message') {
+      const detail = await this.detail(args.id);
+      const body = String(detail.body || '');
+      const offset = Math.max(0, Number(args.offset || 0));
+      const maxChars = Math.max(1, Number(args.max_chars || body.length || 1));
+      const sliced = body.slice(offset, offset + maxChars);
+      const author = firstAuthor(detail.from);
+      return {
+        ...detail,
+        from: author ? [author] : [],
+        body_text: sliced,
+        body_length: body.length,
+        body_returned: sliced.length,
+        offset,
+        has_more: offset + sliced.length < body.length,
+      };
+    }
+
+    if (name === 'list_messages') {
+      const sourceId = await this.sourceId(args.account);
+      const page = await this.get('/api/v1/messages/filter', {
+        source_id: sourceId,
+        conversation_id: args.conversation_id,
+        message_type: 'discord',
+        limit: args.limit,
+        offset: args.offset,
+        sort: 'date',
+        direction: 'asc',
+      });
+      return { data: page?.messages || [], has_more: Boolean(page?.has_more) };
+    }
+
+    if (name === 'search_in_message') {
+      const detail = await this.detail(args.id);
+      const body = String(detail.body || '');
+      const needle = String(args.query || '').trim();
+      if (!needle) return { data: [] };
+      const lower = body.toLowerCase();
+      const q = needle.toLowerCase();
+      const matches = [];
+      let pos = 0;
+      while (matches.length < Math.max(1, Number(args.limit || 5))) {
+        const at = lower.indexOf(q, pos);
+        if (at < 0) break;
+        const line = body.slice(0, at).split('\n').length;
+        const left = Math.max(0, at - 120);
+        const right = Math.min(body.length, at + needle.length + 180);
+        matches.push({ char_offset: at, line, snippet: body.slice(left, right) });
+        pos = at + Math.max(needle.length, 1);
+      }
+      return { data: matches };
+    }
+
+    throw safeError('archive_query_failed');
+  }
+
+  proxy(req, res) {
+    let target;
+    try { target = this.target(); } catch {
+      res.writeHead(503, { 'content-type': 'text/plain' });
+      res.end('msgvault unavailable');
+      return;
+    }
+    const upstream = http.request({
+      host: target.host,
+      port: target.port,
+      method: req.method,
+      path: req.url,
+      headers: { ...req.headers, host: target.host + ':' + target.port },
+    }, upstreamRes => {
+      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    });
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
+      res.end('bad gateway');
+    });
+    req.pipe(upstream);
   }
 }
 
@@ -356,11 +505,11 @@ function requestArchive(socketPath, request) {
   });
 }
 
-async function startArchiveBridge({ socketPath, mcpUrl, selectionPath, mirrorCutoff = null }) {
+async function startArchiveBridge({ socketPath, runtimeFile, webSocketPath = null, selectionPath, mirrorCutoff = null }) {
   if (!path.isAbsolute(socketPath)) throw new Error('archive_socket_must_be_absolute');
   const sources = loadArchiveSources(selectionPath);
   const adapter = new ArchiveAdapter({
-    nativeClient: new NativeArchiveClient(mcpUrl),
+    nativeClient: new RestArchiveClient(runtimeFile),
     sourceIdentifiers: sources,
     mirrorCutoff,
   });
@@ -403,22 +552,45 @@ async function startArchiveBridge({ socketPath, mcpUrl, selectionPath, mirrorCut
     });
   });
 
+  let webServer = null;
+  if (webSocketPath) {
+    if (!path.isAbsolute(webSocketPath)) throw new Error('archive_web_socket_must_be_absolute');
+    fs.mkdirSync(path.dirname(webSocketPath), { recursive: true, mode: 0o700 });
+    try { fs.unlinkSync(webSocketPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    webServer = http.createServer((req, res) => adapter.native.proxy(req, res));
+    webServer.on('upgrade', (_req, socket) => socket.destroy());
+    await new Promise((resolve, reject) => {
+      webServer.once('error', reject);
+      webServer.listen(webSocketPath, () => {
+        fs.chmodSync(webSocketPath, 0o660);
+        webServer.removeListener('error', reject);
+        resolve();
+      });
+    });
+  }
+
   return {
-    close: () => new Promise(done => server.close(() => {
-      try { fs.unlinkSync(socketPath); } catch {}
-      done();
-    })),
+    close: () => Promise.all([
+      new Promise(done => server.close(() => {
+        try { fs.unlinkSync(socketPath); } catch {}
+        done();
+      })),
+      webServer ? new Promise(done => webServer.close(() => {
+        try { fs.unlinkSync(webSocketPath); } catch {}
+        done();
+      })) : Promise.resolve(),
+    ]),
   };
 }
 
 module.exports = {
   ArchiveAdapter,
-  NativeArchiveClient,
+  RestArchiveClient,
   loadArchiveSources,
   messageDetail,
   messageSummary,
   provenance,
   requestArchive,
   startArchiveBridge,
-  validateArchiveURL,
+  resolveRuntimeTarget,
 };

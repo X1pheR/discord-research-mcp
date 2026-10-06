@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-10-06
+
+- Simplify the archive path by querying the existing msgvault loopback REST API directly; the separate msgvault query-MCP sidecar is no longer required.
+- Let the existing archive bridge optionally export msgvault's first-party Web UI/API over a private Unix socket, preserving msgvault `network_mode: none`.
+- Keep the five Discord MCP tools, source scoping, provenance and no-provider-fallback semantics unchanged.
+
 ## v0.5.1
 
 Public packaging and documentation release.

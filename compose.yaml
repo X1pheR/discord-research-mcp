@@ -1,9 +1,10 @@
 services:
   discord-forward:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.1
+    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
     restart: unless-stopped
-    command: ["forward"]
-    user: "1000:1000"
+    command:
+    - forward
+    user: 1000:1000
     environment:
       HOME: /tmp
       XDG_RUNTIME_DIR: /discord-ipc
@@ -20,115 +21,104 @@ services:
       DISCORD_OBSERVATION_DIR: /observations
       DISCORD_CONTROL_SOCKET: /control/ondemand.sock
     volumes:
-      - ${DISCORD_IPC_PATH:-./runtime/discord-ipc}:/discord-ipc:ro
-      - ${DISCORD_CLIENT_SECRET_PATH:-./runtime/secrets/discord-client-secret}:/run/secrets/discord-client-secret:ro
-      - ${DISCORD_REFRESH_TOKEN_PATH:-./runtime/secrets/discord-refresh-token}:/run/secrets/discord-refresh-token:ro
-      - ./examples/selected-sources.json:/app/selected-sources.json:ro
-      - discord-token-state:/token-state
-      - discord-forum-state:/forum-state
-      - discord-health:/health
-      - discord-observations:/observations
-      - discord-control:/control
+    - ${DISCORD_IPC_PATH:-./runtime/discord-ipc}:/discord-ipc:ro
+    - ${DISCORD_CLIENT_SECRET_PATH:-./runtime/secrets/discord-client-secret}:/run/secrets/discord-client-secret:ro
+    - ${DISCORD_REFRESH_TOKEN_PATH:-./runtime/secrets/discord-refresh-token}:/run/secrets/discord-refresh-token:ro
+    - ./examples/selected-sources.json:/app/selected-sources.json:ro
+    - discord-token-state:/token-state
+    - discord-forum-state:/forum-state
+    - discord-health:/health
+    - discord-observations:/observations
+    - discord-control:/control
     read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-
-  msgvault-query-mcp:
-    image: ghcr.io/x1pher/msgvault:0.19.3-x1pher.7
-    restart: unless-stopped
-    network_mode: "container:${MSGVAULT_CONTAINER_NAME:-msgvault}"
-    user: "1000:1000"
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        port=$$(sed -n 's/.*"port": "\([0-9][0-9]*\)".*/\1/p' /data/daemon.1.json | head -n1)
-        test -n "$$port"
-        cat >/tmp/query.toml <<EOF
-        [data]
-        data_dir = "/data"
-        [remote]
-        url = "http://127.0.0.1:$$port"
-        allow_insecure = true
-        EOF
-        exec msgvault --config /tmp/query.toml mcp --read-only --http 127.0.0.1:3032
-    environment:
-      HOME: /data
-      MSGVAULT_HOME: /data
-    volumes:
-      - ${MSGVAULT_DATA_PATH:-./runtime/msgvault}:/data:ro
-    read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    healthcheck:
-      disable: true
-
+    tmpfs:
+    - /tmp:size=32m
+    - mode=1777
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
   discord-archive-bridge:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.1
+    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
     restart: unless-stopped
-    network_mode: "container:${MSGVAULT_CONTAINER_NAME:-msgvault}"
-    command: ["archive-bridge"]
-    user: "1000:1000"
+    network_mode: container:${MSGVAULT_CONTAINER_NAME:-msgvault}
+    command:
+    - archive-bridge
+    user: 1000:1000
     environment:
       HOME: /tmp
       DISCORD_ARCHIVE_SOCKET: /archive-control/archive.sock
-      DISCORD_ARCHIVE_MCP_URL: http://127.0.0.1:3032/mcp
       DISCORD_SELECTION_FILE: /app/selected-sources.json
       DISCORD_MIRROR_CUTOFF: ${DISCORD_MIRROR_CUTOFF:-}
+      DISCORD_ARCHIVE_RUNTIME_FILE: /data/daemon.1.json
+      DISCORD_ARCHIVE_WEB_SOCKET: /archive-control/msgvault-web.sock
     volumes:
-      - ./examples/selected-sources.json:/app/selected-sources.json:ro
-      - discord-archive-control:/archive-control
+    - ./examples/selected-sources.json:/app/selected-sources.json:ro
+    - discord-archive-control:/archive-control
+    - ${MSGVAULT_DATA_PATH:-./runtime/msgvault}:/data:ro
     read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    tmpfs:
+    - /tmp:size=32m
+    - mode=1777
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "test -S /archive-control/archive.sock"]
+      test:
+      - CMD-SHELL
+      - test -S /archive-control/archive.sock && test -S /archive-control/msgvault-web.sock
       interval: 30s
       timeout: 5s
       start_period: 15s
       retries: 3
-    depends_on: [msgvault-query-mcp]
-
   discord-mcp:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.1
+    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
     restart: unless-stopped
-    command: ["mcp"]
-    user: "1000:1000"
+    command:
+    - mcp
+    user: 1000:1000
     environment:
       HOME: /tmp
       DISCORD_CONTROL_SOCKET: /control/ondemand.sock
       DISCORD_ARCHIVE_SOCKET: /archive-control/archive.sock
       DISCORD_MCP_HOST: 0.0.0.0
-      DISCORD_MCP_PORT: "3021"
+      DISCORD_MCP_PORT: '3021'
       DISCORD_MCP_ALLOWED_HOSTS: ${DISCORD_MCP_ALLOWED_HOSTS:-127.0.0.1,localhost}
     volumes:
-      - discord-control:/control
-      - discord-archive-control:/archive-control
+    - discord-control:/control
+    - discord-archive-control:/archive-control
     ports:
-      - "${DISCORD_MCP_BIND:-127.0.0.1:3021}:3021"
+    - ${DISCORD_MCP_BIND:-127.0.0.1:3021}:3021
     read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
+    tmpfs:
+    - /tmp:size=32m
+    - mode=1777
     mem_limit: 128m
     memswap_limit: 128m
-    cpus: 0.50
+    cpus: 0.5
     pids_limit: 64
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3021/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test:
+      - CMD
+      - node
+      - -e
+      - fetch('http://127.0.0.1:3021/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 30s
       timeout: 5s
       start_period: 45s
       retries: 3
-    depends_on: [discord-forward, discord-archive-bridge]
-
+    depends_on:
+    - discord-forward
+    - discord-archive-bridge
 volumes:
-  discord-token-state:
-  discord-forum-state:
-  discord-health:
-  discord-observations:
-  discord-control:
-  discord-archive-control:
+  discord-token-state: null
+  discord-forum-state: null
+  discord-health: null
+  discord-observations: null
+  discord-control: null
+  discord-archive-control: null

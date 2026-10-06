@@ -319,7 +319,8 @@ async function main() {
     const {startArchiveBridge}=require('./archive');
     const bridge=await startArchiveBridge({
       socketPath:env('DISCORD_ARCHIVE_SOCKET',true),
-      mcpUrl:env('DISCORD_ARCHIVE_MCP_URL',true),
+      runtimeFile:env('DISCORD_ARCHIVE_RUNTIME_FILE',true),
+      webSocketPath:env('DISCORD_ARCHIVE_WEB_SOCKET')||null,
       selectionPath:env('DISCORD_SELECTION_FILE',true),
       mirrorCutoff:env('DISCORD_MIRROR_CUTOFF')||null,
     });

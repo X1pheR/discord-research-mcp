@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ArchiveAdapter, loadArchiveSources, provenance, validateArchiveURL } = require('../src/archive');
+const { ArchiveAdapter, loadArchiveSources, provenance, resolveRuntimeTarget } = require('../src/archive');
 
 class FakeNative {
   constructor() { this.calls = []; }
@@ -75,11 +75,14 @@ test('archive selection derives only unique configured guild identifiers', () =>
   assert.deepEqual(loadArchiveSources(file), ['700']);
 });
 
-test('archive backend is fail-closed to loopback MCP only', () => {
-  assert.equal(validateArchiveURL('http://127.0.0.1:3032/mcp').hostname, '127.0.0.1');
-  assert.throws(() => validateArchiveURL('http://192.0.2.10:3032/mcp'), /invalid_archive_backend/);
-  assert.throws(() => validateArchiveURL('https://example.invalid/mcp'), /invalid_archive_backend/);
-  assert.throws(() => validateArchiveURL('http://127.0.0.1:3032/other'), /invalid_archive_backend/);
+test('archive backend resolves only a loopback daemon runtime record', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'discord-research-runtime-'));
+  const good = path.join(dir, 'daemon.json');
+  fs.writeFileSync(good, JSON.stringify({ address: '127.0.0.1:3032' }));
+  assert.deepEqual(resolveRuntimeTarget(good), { host: '127.0.0.1', port: 3032 });
+  fs.writeFileSync(good, JSON.stringify({ address: '192.0.2.10:3032' }));
+  assert.throws(() => resolveRuntimeTarget(good), /invalid_archive_backend/);
+  assert.throws(() => resolveRuntimeTarget('relative.json'), /invalid_archive_backend/);
 });
 
 test('provenance distinguishes public mirror from direct local RPC observation', () => {

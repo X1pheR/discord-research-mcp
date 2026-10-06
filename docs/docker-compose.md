@@ -3,7 +3,7 @@
 The published image is:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.1
+ghcr.io/x1pher/discord-research-mcp:v0.5.2
 ```
 
 `compose.yaml` is a representative Linux deployment for the complete five-tool MCP surface. It preserves the product's trust boundaries: the Discord collector owns provider credentials, the archive bridge owns no Discord credentials, and the network-facing MCP container receives only private Unix sockets.
@@ -16,7 +16,7 @@ ghcr.io/x1pher/discord-research-mcp:v0.5.1
 | Image architecture | `linux/amd64` |
 | Runtime inside image | Node.js 22 |
 | Discord provider | Discord Desktop local RPC/IPC with an OAuth2 application authorized for `rpc,identify,guilds,messages.read` |
-| Archive backend | `ghcr.io/x1pher/msgvault:0.19.3-x1pher.7` read-only MCP against an existing msgvault writer/data directory |
+| Archive backend | `ghcr.io/x1pher/msgvault:0.19.3-x1pher.7` REST API against an existing msgvault writer/data directory |
 | MCP transport | Streamable HTTP on `/mcp`; health on `/healthz` |
 
 Other platforms or versions may work, but are not claimed as tested by this release.
@@ -69,7 +69,7 @@ The MCP endpoint is `http://127.0.0.1:3021/mcp`.
 - The example binds MCP to loopback by default. Use an authenticated reverse proxy before exposing it beyond the local host.
 - Do not put Discord client secrets or refresh tokens in `.env`; Compose receives only file paths.
 - The `discord-mcp` service has no Discord credential mounts and no msgvault data mount.
-- The archive bridge accepts only a loopback msgvault MCP URL and exports a Unix socket.
+- The archive bridge accepts only the loopback address advertised by msgvault `daemon.1.json`, exports a curated archive Unix socket, and may export the first-party Web UI/API through a second Unix socket.
 - An archive miss never invokes Discord.
 - `read_channel` is a bounded live snapshot and is never persisted automatically.
 - Attachment binaries are not acquired.

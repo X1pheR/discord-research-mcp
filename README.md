@@ -9,7 +9,7 @@ The product is designed for evidence gathering, not account automation. It does 
 The same image can run three roles:
 
 1. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
-2. **archive-bridge** connects only to a loopback msgvault read-only MCP endpoint and republishes a curated archive-query subset over a private Unix socket.
+2. **archive-bridge** connects only to the existing loopback msgvault REST API, republishes a curated archive-query subset over a private Unix socket, and can export the first-party msgvault Web UI/API over a second private Unix socket.
 3. **mcp** exposes the agent-facing Discord tools. It has no Discord credentials and talks only to the two Unix sockets.
 
 Durable archive storage, SQLite/FTS query behavior, and single-writer ownership remain with msgvault. The archive bridge never opens the archive database directly.
@@ -44,7 +44,7 @@ The maintained container image is published on GitHub Container Registry:
 ghcr.io/x1pher/discord-research-mcp:v0.5.1
 ```
 
-A representative `compose.yaml` is included for the complete five-tool deployment. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
+A representative `compose.yaml` is included for the complete five-tool deployment using four runtime containers: collector, Discord MCP façade, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
 
 ```sh
 cp .env.example .env
@@ -64,7 +64,7 @@ See [docs/docker-compose.md](docs/docker-compose.md) for prerequisites, tested c
 | Published image | `linux/amd64` |
 | Source/runtime | Node.js 22 |
 | Discord | Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |
-| Archive | msgvault `0.19.3-x1pher.7` read-only MCP against an existing writer/data directory |
+| Archive | msgvault `0.19.3-x1pher.7` REST API against an existing writer/data directory |
 
 Other combinations may work but are not claimed as tested by this release.
 
@@ -103,7 +103,8 @@ Forum-thread state is optional and configured with DISCORD_FORUM_THREAD_STATE_FI
 | Variable | Purpose |
 | --- | --- |
 | DISCORD_ARCHIVE_SOCKET | Private Unix socket created for the MCP façade. |
-| DISCORD_ARCHIVE_MCP_URL | msgvault read-only MCP URL. Only HTTP loopback endpoints with path /mcp are accepted. |
+| DISCORD_ARCHIVE_RUNTIME_FILE | Absolute path to msgvault `daemon.1.json`; only a `127.0.0.1` runtime address is accepted. |
+| DISCORD_ARCHIVE_WEB_SOCKET | Optional private Unix socket that exports the existing msgvault Web UI/API from the isolated namespace. |
 | DISCORD_SELECTION_FILE | Used to derive the allowed local archive source identifiers. |
 | DISCORD_MIRROR_CUTOFF | Optional evidence cutoff attached only to public-mirror results. |
 
