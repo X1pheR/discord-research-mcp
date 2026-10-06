@@ -6,7 +6,7 @@ The product is designed for evidence gathering, not account automation. It does 
 
 ## Architecture
 
-The image supports three runtime roles. The reference deployment runs `forward` and `mcp` together through the supervised `serve` command in one Discord Research container, while `archive-bridge` stays separate because it must join msgvault's isolated network namespace. Together with msgvault, this yields three runtime containers.
+The image supports three runtime roles. The reference deployment runs `forward`, `archive-bridge`, and `mcp` together through the supervised `serve` command in one Discord Research container. msgvault is the only other runtime container, exposed only on the internal deployment network with its own API authentication.
 
 ```mermaid
 flowchart LR
@@ -27,11 +27,11 @@ flowchart LR
 ```
 
 1. **serve** supervises the `forward` and `mcp` child processes in one container. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
-2. **archive-bridge** joins msgvault's isolated network namespace, connects only to the existing loopback msgvault REST API, republishes a curated archive-query subset over a private Unix socket, and can export the first-party msgvault Web UI/API over a second private Unix socket.
+2. **archive-bridge** is an internal process in the Discord Research container. It connects to an authenticated msgvault HTTP endpoint and republishes only the curated archive-query subset over a private Unix socket used by the local `mcp` process.
 3. **mcp** exposes the agent-facing Discord tools and talks only to the two Unix sockets. In the reference deployment it shares the `discord-research` container with `forward` to avoid a redundant container boundary.
 4. **msgvault** remains a separate upstream/downstream product and the sole durable archive writer.
 
-The reference deployment deliberately combines `forward` and `mcp`; separating them is optional hardening, not required architecture. `archive-bridge` remains separate while msgvault uses `network_mode: none`, because it must share msgvault's isolated network namespace. Collapsing to two containers would therefore require weakening that isolation or introducing another cross-namespace transport, which is more complex than the boundary it removes.
+The reference deployment deliberately combines all three Discord roles in one container. msgvault remains a separate product/container because it owns durable archive state and the sole writer lifecycle. Internal Docker-network exposure is authenticated and has no host-published port; browser ingress remains behind the deployment reverse proxy/auth layer.
 
 ## Agent tools
 
@@ -60,10 +60,10 @@ An archive miss is terminal. It never falls back to Discord.
 The maintained container image is published on GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.4
+ghcr.io/x1pher/discord-research-mcp:v0.5.5
 ```
 
-A representative `compose.yaml` is included for the complete five-tool deployment using three runtime containers: combined Discord Research service, archive bridge, and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
+A representative `compose.yaml` is included for the complete five-tool deployment using two runtime containers: the combined Discord Research service and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
 
 ```sh
 cp .env.example .env

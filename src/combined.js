@@ -13,6 +13,7 @@ async function runCombined(options = {}) {
   const scriptPath = options.scriptPath || require.resolve('./pilot');
   const children = [
     startChild('forward', { ...options, scriptPath }),
+    startChild('archive-bridge', { ...options, scriptPath }),
     startChild('mcp', { ...options, scriptPath }),
   ];
   let stopping = false;
@@ -35,9 +36,11 @@ async function runCombined(options = {}) {
       reject(error);
     };
     children[0].once('exit', (code, signal) => finish('forward', code, signal));
-    children[1].once('exit', (code, signal) => finish('mcp', code, signal));
+    children[1].once('exit', (code, signal) => finish('archive-bridge', code, signal));
+    children[2].once('exit', (code, signal) => finish('mcp', code, signal));
     children[0].once('error', reject);
     children[1].once('error', reject);
+    children[2].once('error', reject);
   });
 }
 

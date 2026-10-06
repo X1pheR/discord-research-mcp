@@ -61,14 +61,14 @@ function resolveRuntimeTarget(runtimeFile) {
   return { host: '127.0.0.1', port };
 }
 
-function requestJSON(target, pathname) {
+function requestJSON(target, pathname, apiKey = '') {
   return new Promise((resolve, reject) => {
     const req = http.request({
       host: target.host,
       port: target.port,
       method: 'GET',
       path: pathname,
-      headers: { accept: 'application/json', host: target.host + ':' + target.port },
+      headers: { accept: 'application/json', host: target.host + ':' + target.port, ...(apiKey ? { 'x-api-key': apiKey } : {}) },
     }, res => {
       let raw = '';
       let bytes = 0;
@@ -104,12 +104,32 @@ function firstAuthor(value) {
 }
 
 class RestArchiveClient {
-  constructor(runtimeFile) {
+  constructor(options = {}) {
+    const normalized = typeof options === 'string' ? { runtimeFile: options } : options;
+    const { runtimeFile = null, baseURL = null, apiKeyFile = null } = normalized;
     this.runtimeFile = runtimeFile;
+    this.baseURL = baseURL;
+    this.apiKeyFile = apiKeyFile;
     this.sourceMap = null;
   }
 
+  apiKey() {
+    if (!this.apiKeyFile) return '';
+    const value = fs.readFileSync(this.apiKeyFile, 'utf8').trim();
+    if (!value) throw safeError('archive_auth_unavailable');
+    return value;
+  }
+
   target() {
+    if (this.baseURL) {
+      const url = new URL(this.baseURL);
+      if (url.protocol !== 'http:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+        throw safeError('invalid_archive_backend');
+      }
+      const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw safeError('invalid_archive_backend');
+      return { host: url.hostname, port, protocol: url.protocol };
+    }
     return resolveRuntimeTarget(this.runtimeFile);
   }
 
@@ -118,7 +138,7 @@ class RestArchiveClient {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
     }
-    return requestJSON(this.target(), url.pathname + url.search);
+    return requestJSON(this.target(), url.pathname + url.search, this.apiKey());
   }
 
   async sources() {
@@ -522,11 +542,11 @@ function requestArchive(socketPath, request) {
   });
 }
 
-async function startArchiveBridge({ socketPath, runtimeFile, webSocketPath = null, selectionPath, mirrorCutoff = null }) {
+async function startArchiveBridge({ socketPath, runtimeFile = null, baseURL = null, apiKeyFile = null, webSocketPath = null, selectionPath, mirrorCutoff = null }) {
   if (!path.isAbsolute(socketPath)) throw new Error('archive_socket_must_be_absolute');
   const sources = loadArchiveSources(selectionPath);
   const adapter = new ArchiveAdapter({
-    nativeClient: new RestArchiveClient(runtimeFile),
+    nativeClient: new RestArchiveClient({ runtimeFile, baseURL, apiKeyFile }),
     sourceIdentifiers: sources,
     mirrorCutoff,
   });

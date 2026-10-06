@@ -51,7 +51,7 @@ function toolResult(response, fallbackError) {
 }
 
 function buildServer({ controlSocketPath, archiveSocketPath }) {
-  const server = new McpServer({ name: 'discord-research-mcp', version: '0.5.4' });
+  const server = new McpServer({ name: 'discord-research-mcp', version: '0.5.5' });
 
   server.registerTool('read_channel', {
     description: 'Read one explicit account-visible Discord channel through the authorized local Discord RPC session. Returns one bounded current client snapshot; never persists, subscribes, downloads attachment binaries, or claims full history.',

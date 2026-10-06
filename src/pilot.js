@@ -325,7 +325,9 @@ async function main() {
     const {startArchiveBridge}=require('./archive');
     const bridge=await startArchiveBridge({
       socketPath:env('DISCORD_ARCHIVE_SOCKET',true),
-      runtimeFile:env('DISCORD_ARCHIVE_RUNTIME_FILE',true),
+      runtimeFile:env('DISCORD_ARCHIVE_RUNTIME_FILE')||null,
+      baseURL:env('DISCORD_ARCHIVE_BASE_URL')||null,
+      apiKeyFile:env('DISCORD_ARCHIVE_API_KEY_FILE')||null,
       webSocketPath:env('DISCORD_ARCHIVE_WEB_SOCKET')||null,
       selectionPath:env('DISCORD_SELECTION_FILE',true),
       mirrorCutoff:env('DISCORD_MIRROR_CUTOFF')||null,
