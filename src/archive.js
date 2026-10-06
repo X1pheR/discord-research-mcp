@@ -68,7 +68,7 @@ class NativeArchiveClient {
 
   async connect() {
     if (this.client) return this.client;
-    const client = new Client({ name: 'discord-research-archive-bridge', version: '0.5.0' });
+    const client = new Client({ name: 'discord-research-archive-bridge', version: '0.5.1' });
     const transport = new StreamableHTTPClientTransport(this.url);
     await client.connect(transport);
     this.client = client;
