@@ -1,149 +1,183 @@
 # Discord Research MCP
 
-Discord Research MCP is a read-only research bridge for Discord. It combines an explicitly authorized Discord Desktop local-RPC/OAuth2 acquisition path with a small Discord-focused MCP surface for current channel snapshots and local archive research.
+[![CI](https://github.com/X1pheR/discord-research-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/X1pheR/discord-research-mcp/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/X1pheR/discord-research-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/X1pheR/discord-research-mcp/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/X1pheR/discord-research-mcp)](https://github.com/X1pheR/discord-research-mcp/releases)
+[![License](https://img.shields.io/github/license/X1pheR/discord-research-mcp)](LICENSE)
 
-The product is designed for evidence gathering, not account automation. It does not use normal-user session tokens, self-bot techniques, Discord Client Experiment APIs, message writes, read-state mutations, or attachment-binary acquisition.
+Discord Research MCP is an independent, community-maintained, **read-only MCP server for Discord research**. It combines an explicitly authorized Discord Desktop local-RPC/OAuth2 acquisition path with a small Discord-focused MCP surface for bounded current-channel reads and provenance-aware research over a local [msgvault](https://github.com/X1pheR/msgvault) archive.
+
+This project is not affiliated with, endorsed by, or officially maintained by Discord. Discord remains the authorization boundary for live provider access; msgvault remains a separate product and the sole durable archive writer.
+
+The product is designed for evidence gathering, not account automation. It does **not** use normal-user session tokens, self-bot techniques, Discord Client Experiment APIs, message writes, read-state mutations, automatic provider fallback, account-wide history crawling, or attachment-binary acquisition.
+
+## Why this repository exists
+
+The reusable Discord acquisition and research behavior belongs in a product repository rather than in deployment-specific infrastructure. This repository therefore owns:
+
+- the Discord Desktop OAuth2/local-RPC client behavior;
+- selective forward acquisition and normalized observation output;
+- bounded explicit live channel reads;
+- the curated five-tool Discord MCP surface;
+- the adapter that maps those archive tools onto an authenticated msgvault HTTP API;
+- provenance and incomplete-history semantics;
+- tests, container builds, CI/security checks and versioned releases.
+
+It deliberately does **not** own a msgvault writer, archive database, reverse proxy, browser authentication, deployment-specific source IDs, host paths, secret delivery, backup scheduling, or MCP gateway policy.
+
+## Current compatibility baseline
+
+| Component | Tested baseline |
+| --- | --- |
+| Discord Research MCP release | `v0.5.6` |
+| Container platform | Docker Engine + Docker Compose v2 on Linux |
+| Published image | `linux/amd64` |
+| Runtime | Node.js 22 |
+| Discord | Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |
+| Archive backend | msgvault `0.19.3-x1pher.7` authenticated HTTP API |
+| MCP transport | Streamable HTTP on `/mcp`; health on `/healthz` |
+
+Other combinations may work, but they are not claimed as tested by this release.
 
 ## Architecture
 
-The image supports three runtime roles. The reference deployment runs `forward`, `archive-bridge`, and `mcp` together through the supervised `serve` command in one Discord Research container. msgvault is the only other runtime container, exposed only on the internal deployment network with its own API authentication.
+The reference deployment has **two product containers**:
+
+1. `discord-research`, running the product's `forward`, `archive-bridge`, and `mcp` child processes under the supervised `serve` command;
+2. an existing `msgvault` writer, reachable only through an authenticated internal HTTP endpoint in the deployment.
 
 ```mermaid
 flowchart LR
-    Desktop["Discord Desktop\nlocal IPC"] --> Discord["discord-research\nserve = forward + mcp\nOAuth/RPC + agent-facing MCP"]
-    Discord -->|bounded JSONL observations| Vault["msgvault\nsole archive writer\nSQLite / FTS / Web UI"]
+    Desktop["Discord Desktop\nlocal IPC"] -->|authorized local RPC/OAuth2| Discord["discord-research\nserve: forward + archive-bridge + mcp"]
+    Client["MCP client / gateway"] -->|Streamable HTTP| Discord
 
-    Discord -->|private archive Unix socket| Bridge["discord-archive-bridge\narchive-bridge role"]
-    Bridge -->|loopback REST only| Vault
-    Bridge -->|private Web UI Unix socket| Caddy["Reverse proxy / browser auth"]
-    Caddy --> Web["msgvault Web UI"]
+    Discord -->|bounded JSONL observations| Importer["deployment-owned importer"]
+    Importer -->|single-writer import path| Vault["msgvault\nsole archive writer\nSQLite / FTS / Web UI"]
+    Discord -->|authenticated HTTP archive reads| Vault
 
-    classDef external fill:#eee,stroke:#777,color:#111;
-    classDef discord fill:#e9eefc,stroke:#536dba,color:#111;
-    classDef archive fill:#eef7ee,stroke:#4d7c4d,color:#111;
-    class Desktop,Caddy,Web external;
-    class Discord,Bridge discord;
-    class Vault archive;
+    Browser["Browser"] -->|deployment-owned auth / reverse proxy| Vault
 ```
 
-1. **serve** supervises the `forward` and `mcp` child processes in one container. **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, observation normalization, token rotation state, coverage health, and the private live-read control socket.
-2. **archive-bridge** is an internal process in the Discord Research container. It connects to an authenticated msgvault HTTP endpoint and republishes only the curated archive-query subset over a private Unix socket used by the local `mcp` process.
-3. **mcp** exposes the agent-facing Discord tools and talks only to the two Unix sockets. In the reference deployment it shares the `discord-research` container with `forward` to avoid a redundant container boundary.
-4. **msgvault** remains a separate upstream/downstream product and the sole durable archive writer.
+The three Discord roles are process boundaries, not container boundaries:
 
-The reference deployment deliberately combines all three Discord roles in one container. msgvault remains a separate product/container because it owns durable archive state and the sole writer lifecycle. Internal Docker-network exposure is authenticated and has no host-published port; browser ingress remains behind the deployment reverse proxy/auth layer.
+- **forward** owns the Discord Desktop IPC/OAuth2 session, selected-source subscriptions, normalized observations, token rotation state, acquisition health, and the live-read control socket.
+- **archive-bridge** owns only the curated Discord-to-msgvault query mapping. In the reference deployment it authenticates to msgvault with an API key supplied as a secret file.
+- **mcp** exposes the five agent-facing Discord tools and communicates with the two sibling processes through private in-container Unix sockets.
 
-## Agent tools
+All three roles intentionally share one container trust boundary in the reference deployment. msgvault stays separate because it owns durable archive state and the single-writer lifecycle.
 
-The MCP surface is intentionally small:
+## MCP tools
 
-- search_messages
-- get_message
-- list_messages
-- search_thread
-- read_channel
+All tools are read-only.
 
-See docs/tools.md for inputs, limits, provenance, and failure behavior.
+| Tool | Purpose | Provider behavior |
+| --- | --- | --- |
+| `search_messages` | Full-text search of configured archived Discord evidence. | Archive-only; a miss never contacts Discord. |
+| `get_message` | Read bounded body context for one archive result. | Archive-only. |
+| `list_messages` | List a bounded page in one archived conversation/thread. | Archive-only. |
+| `search_thread` | Search a bounded local page within one archived conversation/thread. | Archive-only. |
+| `read_channel` | Read one explicit account-visible channel as a current snapshot. | Exactly one bounded Discord `GET_CHANNEL`; never persisted automatically. |
 
-## Coverage and provenance
+See [`docs/tools.md`](docs/tools.md) for the complete input, limit, provenance and failure contract.
 
-Every result is explicit about what it proves.
+## Provenance and coverage
 
-- read_channel returns acquisition=live_rpc, complete_history=false, and exactly one bounded Discord GET_CHANNEL snapshot.
-- Direct archived observations return acquisition=local_rpc_observation, complete_history=false.
-- Public mirror evidence returns acquisition=public_git_mirror, complete_history=false, plus stored repository/commit provenance and an optional deployment-supplied mirror cutoff.
+Every result states what it actually proves:
 
-An archive miss is terminal. It never falls back to Discord.
+- `read_channel`: `acquisition=live_rpc`, `complete_history=false`, one bounded current-client snapshot;
+- direct archived observations: `acquisition=local_rpc_observation`, `complete_history=false`;
+- imported public-mirror evidence: `acquisition=public_git_mirror`, `complete_history=false`, with stored repository/commit provenance and an optional deployment-supplied cutoff.
 
-## Published container and Docker Compose
+Archive presence never upgrades evidence to “complete history”. An archive miss is terminal and never falls back to Discord.
 
-The maintained container image is published on GitHub Container Registry:
+## Container image
+
+Versioned images are published to GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.5
+ghcr.io/x1pher/discord-research-mcp:v0.5.6
 ```
 
-A representative `compose.yaml` is included for the complete five-tool deployment using two runtime containers: the combined Discord Research service and the existing msgvault writer. It preserves the provider/archive separation and uses an existing msgvault writer as the archive backend.
+The Git tag, package version, MCP server version and image tag use the same release version.
+
+## Quick start
+
+The included [`compose.yaml`](compose.yaml) runs **one `discord-research` service**. It expects an existing msgvault writer on a shared Docker network. msgvault is a separate product and keeps its own deployment/release lifecycle.
+
+Prerequisites:
+
+- Discord Desktop is running and its IPC directory is mountable by Docker.
+- A Discord OAuth2 application is authorized for `rpc,identify,guilds,messages.read`.
+- A msgvault writer is already running on a Docker network reachable by `discord-research`.
+- The msgvault HTTP API requires an API key; store the same key in a read-only file for Discord Research.
+- Your archive import/acknowledgement path is configured separately; this product does not create a second msgvault writer.
+
+Copy and edit the example environment:
 
 ```sh
 cp .env.example .env
-# Edit .env and examples/selected-sources.json.
+mkdir -p runtime/secrets
+# Write your Discord client secret, bootstrap refresh token and msgvault API key
+# into the files referenced by .env. Never commit those files.
+
+# Edit examples/selected-sources.json with your authorized guild/channel parents.
 docker compose --env-file .env config -q
 docker compose pull
 docker compose up -d
 ```
 
-See [docs/docker-compose.md](docs/docker-compose.md) for prerequisites, tested compatibility, archive/import ownership, and security boundaries.
+Check health:
 
-## Tested compatibility
+```sh
+curl --fail http://127.0.0.1:3021/healthz
+```
 
-| Component | Baseline |
-| --- | --- |
-| Container platform | Docker Engine + Docker Compose v2 on Linux |
-| Published image | `linux/amd64` |
-| Source/runtime | Node.js 22 |
-| Discord | Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |
-| Archive | msgvault `0.19.3-x1pher.7` REST API against an existing writer/data directory |
+The MCP endpoint is `http://127.0.0.1:3021/mcp` with the default example binding.
 
-Other combinations may work but are not claimed as tested by this release.
-
-## Requirements
-
-- A Discord Desktop client whose local IPC socket is available to the collector.
-- A Discord OAuth2 application authorized for the scopes required by your deployment. The intended research baseline is rpc,identify,guilds,messages.read.
-- A selected-source configuration file.
-- For archive tools: a msgvault release whose read-only MCP get_message response exposes the sanitized source_provenance field for imported mirror evidence.
-- Node.js 22 for source development, or the published container image for deployment.
+See [`docs/docker-compose.md`](docs/docker-compose.md) for the msgvault network/API contract, secret-file setup, archive import ownership and deployment security notes.
 
 ## Configuration
 
-### Collector: forward
-
-Required deployment values are supplied at runtime; none are shipped as product defaults.
+### Discord provider and acquisition
 
 | Variable | Purpose |
 | --- | --- |
-| DISCORD_CLIENT_ID | OAuth2 application/client ID. |
-| DISCORD_SCOPES | Comma-separated OAuth2 scopes. |
-| DISCORD_REDIRECT_URI | Registered OAuth2 redirect URI. |
-| DISCORD_CLIENT_SECRET_FILE | Read-only file containing the client secret. |
-| DISCORD_REFRESH_TOKEN_FILE | Read-only bootstrap refresh-token file. |
-| DISCORD_TOKEN_STATE_FILE | Private application-owned latest refresh-token state. |
-| DISCORD_SELECTION_FILE | Versioned selected-source JSON file. |
-| DISCORD_HEALTH_FILE | Content-free acquisition health record. |
-| DISCORD_IMPORT_HEALTH_FILE | Content-free importer health record. |
-| DISCORD_OBSERVATION_DIR | Private JSONL handoff directory. |
-| DISCORD_CONTROL_SOCKET | Private Unix socket used by read_channel. |
+| `DISCORD_CLIENT_ID` | Discord OAuth2 application/client ID. |
+| `DISCORD_SCOPES` | OAuth2 scopes; tested baseline is `rpc,identify,guilds,messages.read`. |
+| `DISCORD_REDIRECT_URI` | Registered OAuth2 redirect URI. |
+| `DISCORD_CLIENT_SECRET_FILE` | Read-only file containing the Discord client secret. |
+| `DISCORD_REFRESH_TOKEN_FILE` | Read-only bootstrap refresh-token file. |
+| `DISCORD_TOKEN_STATE_FILE` | Private application-owned latest refresh-token state. |
+| `DISCORD_FORUM_THREAD_STATE_FILE` | Optional persisted explicit forum-thread seed state. |
+| `DISCORD_SELECTION_FILE` | Selected-source JSON configuration. |
+| `DISCORD_HEALTH_FILE` | Content-free acquisition health record. |
+| `DISCORD_IMPORT_HEALTH_FILE` | Content-free importer health record. |
+| `DISCORD_OBSERVATION_DIR` | Private normalized JSONL handoff directory. |
 
-Forum-thread state is optional and configured with DISCORD_FORUM_THREAD_STATE_FILE when the deployment uses persisted explicit thread seeds.
-
-### Archive bridge: archive-bridge
+### Archive adapter
 
 | Variable | Purpose |
 | --- | --- |
-| DISCORD_ARCHIVE_SOCKET | Private Unix socket created for the MCP façade. |
-| DISCORD_ARCHIVE_RUNTIME_FILE | Absolute path to msgvault `daemon.1.json`; only a `127.0.0.1` runtime address is accepted. |
-| DISCORD_ARCHIVE_WEB_SOCKET | Optional private Unix socket that exports the existing msgvault Web UI/API from the isolated namespace. |
-| DISCORD_SELECTION_FILE | Used to derive the allowed local archive source identifiers. |
-| DISCORD_MIRROR_CUTOFF | Optional evidence cutoff attached only to public-mirror results. |
+| `DISCORD_ARCHIVE_BASE_URL` | Authenticated msgvault HTTP base URL, for example `http://msgvault:8080/`. |
+| `DISCORD_ARCHIVE_API_KEY_FILE` | Read-only file containing the msgvault API key. |
+| `DISCORD_ARCHIVE_SOCKET` | Private in-container Unix socket between `archive-bridge` and `mcp`. |
+| `DISCORD_MIRROR_CUTOFF` | Optional evidence cutoff applied only to public-mirror provenance. |
 
-The intended deployment keeps the msgvault writer network-isolated. `archive-bridge` joins that same namespace, talks to the existing loopback REST API, and exports only private Unix sockets.
-
-### Agent MCP: mcp
+### MCP listener
 
 | Variable | Purpose |
 | --- | --- |
-| DISCORD_CONTROL_SOCKET | Live-read collector socket. |
-| DISCORD_ARCHIVE_SOCKET | Archive bridge socket. |
-| DISCORD_MCP_HOST | HTTP listen host. |
-| DISCORD_MCP_PORT | HTTP listen port. |
-| DISCORD_MCP_ALLOWED_HOSTS | Optional comma-separated Host-header allowlist. |
+| `DISCORD_CONTROL_SOCKET` | Private in-container live-read socket between `forward` and `mcp`. |
+| `DISCORD_ARCHIVE_SOCKET` | Private in-container archive socket. |
+| `DISCORD_MCP_HOST` | MCP HTTP listen host. |
+| `DISCORD_MCP_PORT` | MCP HTTP listen port. |
+| `DISCORD_MCP_ALLOWED_HOSTS` | Optional comma-separated Host-header allowlist. |
 
 ## Source selection
 
-Selection is configuration, never a product default. Example:
+Selection is configuration, never a product default. The checked-in example uses synthetic IDs:
 
-~~~json
+```json
 {
   "version": 1,
   "sources": [
@@ -151,27 +185,66 @@ Selection is configuration, never a product default. Example:
     {"guild_id": "700", "channel_id": "801"}
   ]
 }
-~~~
+```
 
-The IDs above are synthetic. A selected forum parent may admit only provider-validated child thread channels whose guild, type, and parent_id bind them to that selected parent.
+A selected forum parent may admit only provider-validated child thread channels whose guild, type and `parent_id` bind them to that selected parent.
 
 ## Observation handoff
 
-The collector publishes private version-1 JSONL observations. A deployment may import them through msgvault's import-discord-observations command, but the deployment must preserve msgvault's single-writer contract. Docker invocation, host paths, acknowledgement cleanup, backup wiring, and scheduling are deliberately outside this product.
+`forward` writes private version-1 JSONL observations. A deployment may import them through msgvault's `import-discord-observations` path, but it must preserve msgvault's single-writer contract.
 
-## Development
+Docker invocation, importer scheduling, acknowledgement cleanup, host storage paths, backup wiring and recovery policy remain deployment-owned rather than product-owned.
 
-~~~sh
-npm ci --ignore-scripts
-npm test
-python3 scripts/public-scrub.py
-docker build -t discord-research-mcp:dev .
-~~~
+## Security model
 
-## Security
+The main guarantees are:
 
-Read SECURITY.md and docs/security-provider-boundary.md before deploying. The archive adapter is intentionally loopback-only and the agent-facing surface contains no write/delete/stage/export tools.
+- no normal-user Discord token or self-bot path;
+- no Discord writes or read-state mutations;
+- no automatic archive-to-provider fallback;
+- no attachment-binary acquisition;
+- source scope is configuration-driven and revalidated;
+- msgvault credentials are supplied through external secret files;
+- the current reference topology uses authenticated msgvault HTTP on a deployment-owned internal network;
+- the public example publishes no msgvault host port because msgvault is not defined by this repository;
+- the agent-facing MCP namespace contains only the five reviewed Discord tools.
 
-## License
+Read [`SECURITY.md`](SECURITY.md) and [`docs/security-provider-boundary.md`](docs/security-provider-boundary.md) before deployment.
 
-MIT. See LICENSE.
+## Development and verification
+
+Node.js 22 is the tested development runtime.
+
+The canonical repository-local verification gate is:
+
+```sh
+./scripts/verify.sh
+```
+
+It installs the locked dependencies, runs the product tests, checks public-source hygiene and public package consistency, validates the Compose example when Docker Compose is available, and builds the container image when Docker is available. CI and release workflows reuse this gate.
+
+## Feedback and contributions
+
+Use [GitHub Issues](https://github.com/X1pheR/discord-research-mcp/issues) for focused bugs and proposals. Pull requests should remain within the documented read-only/provider/archive boundaries and include applicable tests and documentation updates.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development workflow. Security reports must follow [`SECURITY.md`](SECURITY.md).
+
+User-visible changes are summarized in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Release model
+
+A release is accepted only when the package version, MCP server version, Git tag and GHCR tag agree and the repository verification gate passes.
+
+```text
+package:   0.5.6
+Git tag:   v0.5.6
+image:     ghcr.io/x1pher/discord-research-mcp:v0.5.6
+```
+
+Deployment-specific msgvault versions, source selections, credentials, reverse proxies and backup policies are independent concerns and are not embedded in the image.
+
+## License and project relationships
+
+Discord Research MCP is licensed under the [MIT License](LICENSE).
+
+Discord is an independent upstream service governed by Discord's own software, authorization and policies. msgvault is a separate open-source archive product with its own source, releases and licensing. This repository does not redistribute Discord Desktop or msgvault.

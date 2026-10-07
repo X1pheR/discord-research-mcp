@@ -1,10 +1,17 @@
+networks:
+  archive:
+    external: true
+    name: ${MSGVAULT_NETWORK:-msgvault}
+
 services:
-  discord-forward:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
+  discord-research:
+    image: ghcr.io/x1pher/discord-research-mcp:v0.5.6
+    container_name: discord-research
     restart: unless-stopped
-    command:
-    - forward
-    user: 1000:1000
+    command: [serve]
+    user: "1000:1000"
+    networks:
+      - archive
     environment:
       HOME: /tmp
       XDG_RUNTIME_DIR: /discord-ipc
@@ -20,105 +27,51 @@ services:
       DISCORD_IMPORT_HEALTH_FILE: /health/import.json
       DISCORD_OBSERVATION_DIR: /observations
       DISCORD_CONTROL_SOCKET: /control/ondemand.sock
-    volumes:
-    - ${DISCORD_IPC_PATH:-./runtime/discord-ipc}:/discord-ipc:ro
-    - ${DISCORD_CLIENT_SECRET_PATH:-./runtime/secrets/discord-client-secret}:/run/secrets/discord-client-secret:ro
-    - ${DISCORD_REFRESH_TOKEN_PATH:-./runtime/secrets/discord-refresh-token}:/run/secrets/discord-refresh-token:ro
-    - ./examples/selected-sources.json:/app/selected-sources.json:ro
-    - discord-token-state:/token-state
-    - discord-forum-state:/forum-state
-    - discord-health:/health
-    - discord-observations:/observations
-    - discord-control:/control
-    read_only: true
-    tmpfs:
-    - /tmp:size=32m
-    - mode=1777
-    cap_drop:
-    - ALL
-    security_opt:
-    - no-new-privileges:true
-  discord-archive-bridge:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
-    restart: unless-stopped
-    network_mode: container:${MSGVAULT_CONTAINER_NAME:-msgvault}
-    command:
-    - archive-bridge
-    user: 1000:1000
-    environment:
-      HOME: /tmp
       DISCORD_ARCHIVE_SOCKET: /archive-control/archive.sock
-      DISCORD_SELECTION_FILE: /app/selected-sources.json
+      DISCORD_ARCHIVE_BASE_URL: ${DISCORD_ARCHIVE_BASE_URL:-http://msgvault:8080/}
+      DISCORD_ARCHIVE_API_KEY_FILE: /run/secrets/msgvault-api-key
       DISCORD_MIRROR_CUTOFF: ${DISCORD_MIRROR_CUTOFF:-}
-      DISCORD_ARCHIVE_RUNTIME_FILE: /data/daemon.1.json
-      DISCORD_ARCHIVE_WEB_SOCKET: /archive-control/msgvault-web.sock
-    volumes:
-    - ./examples/selected-sources.json:/app/selected-sources.json:ro
-    - discord-archive-control:/archive-control
-    - ${MSGVAULT_DATA_PATH:-./runtime/msgvault}:/data:ro
-    read_only: true
-    tmpfs:
-    - /tmp:size=32m
-    - mode=1777
-    cap_drop:
-    - ALL
-    security_opt:
-    - no-new-privileges:true
-    healthcheck:
-      test:
-      - CMD-SHELL
-      - test -S /archive-control/archive.sock && test -S /archive-control/msgvault-web.sock
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
-  discord-mcp:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.2
-    restart: unless-stopped
-    command:
-    - mcp
-    user: 1000:1000
-    environment:
-      HOME: /tmp
-      DISCORD_CONTROL_SOCKET: /control/ondemand.sock
-      DISCORD_ARCHIVE_SOCKET: /archive-control/archive.sock
       DISCORD_MCP_HOST: 0.0.0.0
-      DISCORD_MCP_PORT: '3021'
+      DISCORD_MCP_PORT: "3021"
       DISCORD_MCP_ALLOWED_HOSTS: ${DISCORD_MCP_ALLOWED_HOSTS:-127.0.0.1,localhost}
     volumes:
-    - discord-control:/control
-    - discord-archive-control:/archive-control
+      - ${DISCORD_IPC_PATH:-./runtime/discord-ipc}:/discord-ipc:ro
+      - ${DISCORD_CLIENT_SECRET_PATH:-./runtime/secrets/discord-client-secret}:/run/secrets/discord-client-secret:ro
+      - ${DISCORD_REFRESH_TOKEN_PATH:-./runtime/secrets/discord-refresh-token}:/run/secrets/discord-refresh-token:ro
+      - ${MSGVAULT_API_KEY_PATH:-./runtime/secrets/msgvault-api-key}:/run/secrets/msgvault-api-key:ro
+      - ./examples/selected-sources.json:/app/selected-sources.json:ro
+      - discord-token-state:/token-state
+      - discord-forum-state:/forum-state
+      - discord-health:/health
+      - discord-observations:/observations
     ports:
-    - ${DISCORD_MCP_BIND:-127.0.0.1:3021}:3021
+      - ${DISCORD_MCP_BIND:-127.0.0.1:3021}:3021
     read_only: true
     tmpfs:
-    - /tmp:size=32m
-    - mode=1777
-    mem_limit: 128m
-    memswap_limit: 128m
-    cpus: 0.5
-    pids_limit: 64
+      - /tmp:size=32m,mode=1777
+      - /control:size=8m,mode=0700,uid=1000,gid=1000
+      - /archive-control:size=8m,mode=0700,uid=1000,gid=1000
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
     cap_drop:
-    - ALL
+      - ALL
     security_opt:
-    - no-new-privileges:true
+      - no-new-privileges:true
     healthcheck:
       test:
-      - CMD
-      - node
-      - -e
-      - fetch('http://127.0.0.1:3021/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3021/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 30s
       timeout: 5s
       start_period: 45s
       retries: 3
-    depends_on:
-    - discord-forward
-    - discord-archive-bridge
+
 volumes:
-  discord-token-state: null
-  discord-forum-state: null
-  discord-health: null
-  discord-observations: null
-  discord-control: null
-  discord-archive-control: null
+  discord-token-state:
+  discord-forum-state:
+  discord-health:
+  discord-observations:

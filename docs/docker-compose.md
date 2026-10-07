@@ -1,50 +1,115 @@
 # Docker Compose deployment
 
-The published image is:
+The published reference image is:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.2
+ghcr.io/x1pher/discord-research-mcp:v0.5.6
 ```
 
-`compose.yaml` is a representative Linux deployment for the complete five-tool MCP surface. It preserves the product's trust boundaries: the Discord collector owns provider credentials, the archive bridge owns no Discord credentials, and the network-facing MCP container receives only private Unix sockets.
+The repository `compose.yaml` runs one `discord-research` service. It expects an existing msgvault writer on a shared Docker network. Together those are the reference **two-container product topology**.
+
+msgvault is not defined in this repository because it is a separate product with its own release, storage and writer lifecycle.
 
 ## Tested compatibility baseline
 
 | Component | Tested / supported baseline |
 | --- | --- |
 | Container platform | Docker Engine with Docker Compose v2 on Linux |
+| Discord Research image | `ghcr.io/x1pher/discord-research-mcp:v0.5.6` |
 | Image architecture | `linux/amd64` |
 | Runtime inside image | Node.js 22 |
-| Discord provider | Discord Desktop local RPC/IPC with an OAuth2 application authorized for `rpc,identify,guilds,messages.read` |
-| Archive backend | `ghcr.io/x1pher/msgvault:0.19.3-x1pher.7` REST API against an existing msgvault writer/data directory |
+| Discord provider | Discord Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |
+| Archive backend | msgvault `0.19.3-x1pher.7` authenticated HTTP API |
 | MCP transport | Streamable HTTP on `/mcp`; health on `/healthz` |
 
-Other platforms or versions may work, but are not claimed as tested by this release.
+Other platforms or versions may work, but they are not claimed as tested by this release.
+
+## Runtime shape
+
+The `discord-research` container runs three supervised child processes:
+
+- `forward` — Discord provider/acquisition lifecycle;
+- `archive-bridge` — curated authenticated msgvault reads;
+- `mcp` — five-tool agent-facing MCP server.
+
+They deliberately share one container trust boundary. Private `/control` and `/archive-control` sockets are tmpfs-only process IPC.
+
+msgvault remains a separate container because it owns durable archive state and the single-writer lifecycle.
 
 ## Prerequisites
 
-1. Discord Desktop is running and its local IPC directory is mountable by Docker.
+1. Discord Desktop is running and its local IPC directory can be mounted read-only into the container.
 2. You have a Discord OAuth2 application and bootstrap refresh token.
-3. A msgvault writer container is already running and its data directory is available on the Docker host.
-4. Your archive has been populated separately. Discord Research MCP deliberately does not own msgvault import scheduling or writer lifecycle.
+3. A msgvault writer is already running.
+4. msgvault listens on an internal Docker network address and requires an API key.
+5. Both containers share a Docker network.
+6. Your deployment separately owns observation import/acknowledgement so msgvault remains the sole archive writer.
 
-The Compose file does **not** turn forward observations into archive rows by itself. The collector writes normalized observations to the `discord-observations` volume; importing and acknowledging those files remains deployment-owned so msgvault keeps a single writer.
+The Discord application's registered redirect URI must match `DISCORD_REDIRECT_URI`.
 
-## Configure
+## Prepare msgvault
 
-Copy the example environment file and edit it:
+Configure msgvault according to its own documentation. The relevant server shape is an authenticated internal endpoint, for example:
+
+```toml
+[server]
+bind_addr = "0.0.0.0"
+api_port = 8080
+api_key = "replace-with-a-strong-secret"
+```
+
+Do **not** publish that port on the Docker host unless your deployment has a separate reason to do so.
+
+Create or reuse a shared network and attach msgvault to it. One generic example is:
+
+```sh
+docker network create msgvault 2>/dev/null || true
+docker network connect msgvault msgvault 2>/dev/null || true
+```
+
+The example assumes the existing writer container is named `msgvault`. If your deployment uses another DNS name, set `DISCORD_ARCHIVE_BASE_URL` accordingly.
+
+An unauthenticated request should fail:
+
+```sh
+docker run --rm --network msgvault curlimages/curl:8.17.0 \
+  -sS -o /dev/null -w '%{http_code}\n' \
+  http://msgvault:8080/api/v1/stats
+```
+
+The expected status is `401`.
+
+## Configure Discord Research
+
+Copy the example environment file:
 
 ```sh
 cp .env.example .env
+mkdir -p runtime/secrets
 ```
 
-Create the two secret files referenced by `.env`. Keep them outside Git and readable only by the account that runs Docker.
+Create these secret files outside Git:
 
-Edit `examples/selected-sources.json` to contain the Discord guild/channel parents that your deployment is authorized to research. The checked-in IDs are synthetic examples.
+- Discord client secret;
+- Discord bootstrap refresh token;
+- the same msgvault API key configured on the writer.
 
-At minimum, set `DISCORD_CLIENT_ID`, `DISCORD_IPC_PATH`, `DISCORD_CLIENT_SECRET_PATH`, `DISCORD_REFRESH_TOKEN_PATH`, `MSGVAULT_CONTAINER_NAME`, and `MSGVAULT_DATA_PATH`.
+Keep them readable only by the account that runs Docker.
 
-The Discord application's registered redirect URI must match `DISCORD_REDIRECT_URI`.
+Edit `examples/selected-sources.json` with the guild/channel parents your deployment is authorized to research. The checked-in IDs are synthetic.
+
+Important environment values:
+
+| Variable | Purpose |
+| --- | --- |
+| `DISCORD_CLIENT_ID` | Discord OAuth2 application ID. |
+| `DISCORD_IPC_PATH` | Host path containing the Discord Desktop IPC socket. |
+| `DISCORD_CLIENT_SECRET_PATH` | Host path to the Discord client-secret file. |
+| `DISCORD_REFRESH_TOKEN_PATH` | Host path to the bootstrap refresh-token file. |
+| `MSGVAULT_NETWORK` | External Docker network shared with msgvault. |
+| `DISCORD_ARCHIVE_BASE_URL` | msgvault HTTP base URL reachable on that network. |
+| `MSGVAULT_API_KEY_PATH` | Host path to the msgvault API-key file. |
+| `DISCORD_MCP_BIND` | Host binding for the MCP HTTP listener. |
 
 ## Validate and start
 
@@ -54,24 +119,41 @@ docker compose pull
 docker compose up -d
 ```
 
-Check the MCP health endpoint:
+Check health:
 
 ```sh
 curl --fail http://127.0.0.1:3021/healthz
 ```
 
-A healthy response requires both private sockets: the live Discord control socket and the archive bridge socket.
+A healthy response requires both live Discord RPC and authenticated archive connectivity.
 
-The MCP endpoint is `http://127.0.0.1:3021/mcp`.
+The MCP endpoint is:
+
+```text
+http://127.0.0.1:3021/mcp
+```
+
+## Archive import ownership
+
+The `forward` process writes normalized private JSONL observations. This repository does **not** run a msgvault writer or import scheduler.
+
+A consuming deployment may submit those observation files through msgvault's supported import path, but it must keep one authoritative writer and own:
+
+- importer invocation/scheduling;
+- acknowledgement or cleanup of successfully imported files;
+- persistent host paths;
+- backup and recovery.
+
+An archive miss from an MCP tool never contacts Discord.
 
 ## Security notes
 
-- The example binds MCP to loopback by default. Use an authenticated reverse proxy before exposing it beyond the local host.
-- Do not put Discord client secrets or refresh tokens in `.env`; Compose receives only file paths.
-- The `discord-mcp` service has no Discord credential mounts and no msgvault data mount.
-- The archive bridge accepts only the loopback address advertised by msgvault `daemon.1.json`, exports a curated archive Unix socket, and may export the first-party Web UI/API through a second Unix socket.
-- An archive miss never invokes Discord.
-- `read_channel` is a bounded live snapshot and is never persisted automatically.
+- The example binds the MCP listener to host loopback by default.
+- Do not put Discord or msgvault secret values in `.env`; only paths to secret files belong there.
+- The three Discord child processes share one container trust boundary. Do not describe them as separate credential-isolated containers.
+- msgvault authentication is mandatory for the current reference topology.
+- The public Compose file defines no msgvault service and therefore cannot publish a msgvault host port.
+- `read_channel` is a bounded current snapshot and is never persisted automatically.
 - Attachment binaries are not acquired.
 
-See [security-provider-boundary.md](security-provider-boundary.md) for the full trust model and [tools.md](tools.md) for the tool contract.
+See [`security-provider-boundary.md`](security-provider-boundary.md) for the trust model and [`tools.md`](tools.md) for the MCP contract.
