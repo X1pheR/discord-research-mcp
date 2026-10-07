@@ -227,6 +227,8 @@ It installs the locked dependencies, runs the product tests, checks public-sourc
 
 Use [GitHub Issues](https://github.com/X1pheR/discord-research-mcp/issues) for focused bugs and proposals. Pull requests should remain within the documented read-only/provider/archive boundaries and include applicable tests and documentation updates.
 
+Roadmap and project planning live in [GitHub Projects](https://github.com/X1pheR/discord-research-mcp/projects).
+
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development workflow. Security reports must follow [`SECURITY.md`](SECURITY.md).
 
 User-visible changes are summarized in [`CHANGELOG.md`](CHANGELOG.md).
