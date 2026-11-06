@@ -37,7 +37,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: ./scripts/verify.sh
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
