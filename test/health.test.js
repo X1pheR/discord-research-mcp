@@ -12,4 +12,6 @@ test('SDD-DLE-018 acquisition health requires fresh subscription and healthy imp
  assert.equal(H.healthy(collector,archive,now+120000),false);
  assert.equal(H.healthy({...collector,active:[]},archive,now),false);
  assert.equal(H.healthy({...collector,coverage:'partial_selected_sources',source_coverage:[{guild_id:'700',channel_id:'800',channel_type:15,coverage:'unsupported_forum_children',complete:false}]},archive,now),true);
+ assert.equal(H.healthy({...collector,reconciliation_enabled:true,last_interaction:new Date(now).toISOString()},archive,now),true);
+ assert.equal(H.healthy({...collector,reconciliation_enabled:true,last_interaction:new Date(now-360000).toISOString()},archive,now),false);
 });

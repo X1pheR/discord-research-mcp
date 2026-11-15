@@ -2,7 +2,9 @@
 const fs=require('node:fs');
 function healthy(collector,archive,now=Date.now()){
  const fresh=state=>state&&Number.isFinite(Date.parse(state.updated_at))&&now-Date.parse(state.updated_at)<90000;
- return Boolean(fresh(collector)&&fresh(archive)&&collector.status==='subscribed'&&archive.status==='ready'&&collector.selected?.length&&JSON.stringify(collector.selected)===JSON.stringify(collector.active));
+ const interactionFresh=!collector?.reconciliation_enabled ||
+  (Number.isFinite(Date.parse(collector.last_interaction)) && now-Date.parse(collector.last_interaction)<300000);
+ return Boolean(fresh(collector)&&fresh(archive)&&interactionFresh&&collector.status==='subscribed'&&archive.status==='ready'&&collector.selected?.length&&JSON.stringify(collector.selected)===JSON.stringify(collector.active));
 }
 module.exports={healthy};
 if(require.main===module){

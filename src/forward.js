@@ -133,6 +133,7 @@ class Session {
     this.subscriptions.push(await this.client.subscribe('CHANNEL_CREATE'));
     this.report({
       active:this.sources,derived:this.derivedState(),...this.coverageState(),
+      reconciliation_enabled:this.sources.some(s=>Number(this.channels.get(s.channel_id)?.type)!==FORUM_TYPE),
       status:this.revalidationFailures?'degraded':'subscribed',
       reason:this.revalidationFailures?'forum_state_revalidation_failed':null,
       last_interaction:new Date().toISOString(),
