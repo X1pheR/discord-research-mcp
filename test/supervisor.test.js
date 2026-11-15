@@ -42,6 +42,8 @@ test('SDD-DLE-019 bounded selected-channel reconciliation imports new/edited sna
  client.subscribe=async()=>({unsubscribe:async()=>{}});
  const session=new Session(client,[{guild_id:'700',channel_id:'800'}],x=>observations.push(x),x=>states.push(x));
  await session.start();
+ await session.reconcileSnapshots(()=>false);
+ assert.equal(observations.length,0);
  await session.reconcileSnapshots();
  assert.equal(observations.length,1);
  assert.equal(observations[0].message.content,'first');

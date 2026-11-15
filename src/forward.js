@@ -172,10 +172,11 @@ class Session {
     this.emit(observation);
     this.report({last_observation:new Date().toISOString()});
   }
-  async reconcileSnapshots() {
+  async reconcileSnapshots(shouldContinue=()=>true) {
     // Discord RPC can accept subscriptions without delivering events.
     // Inspect only bounded snapshots of explicitly selected non-forum channels.
     for (const selected of this.sources) {
+      if (!shouldContinue() || !this.state.active.length) break;
       const known=this.channels.get(selected.channel_id);
       if (!known || Number(known.type)===FORUM_TYPE) continue;
       try {
