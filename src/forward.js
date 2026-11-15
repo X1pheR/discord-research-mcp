@@ -27,6 +27,7 @@ class Session {
     this.emit=emit; this.health=health; this.chain=Promise.resolve();
     this.channels=new Map(); this.listeners=[]; this.subscriptions=[];
     this.forumParents=new Map(); this.derived=new Map(); this.forumState=options.forumState||null; this.revalidationFailures=0;
+    this.snapshotVersions=new Map();
     this.state={selected:this.sources,active:[],derived:[],source_coverage:[],coverage:'unknown',status:'starting',gap:true,reason:'start',last_interaction:null,last_observation:null};
   }
   report(delta) {Object.assign(this.state,delta); this.health(JSON.parse(JSON.stringify(this.state)));}
@@ -132,6 +133,7 @@ class Session {
     this.subscriptions.push(await this.client.subscribe('CHANNEL_CREATE'));
     this.report({
       active:this.sources,derived:this.derivedState(),...this.coverageState(),
+      reconciliation_enabled:this.sources.some(s=>Number(this.channels.get(s.channel_id)?.type)!==FORUM_TYPE),
       status:this.revalidationFailures?'degraded':'subscribed',
       reason:this.revalidationFailures?'forum_state_revalidation_failed':null,
       last_interaction:new Date().toISOString(),
@@ -169,6 +171,42 @@ class Session {
     }
     this.emit(observation);
     this.report({last_observation:new Date().toISOString()});
+  }
+  async reconcileSnapshots(shouldContinue=()=>true) {
+    // Discord RPC can accept subscriptions without delivering events.
+    // Inspect only bounded snapshots of explicitly selected non-forum channels.
+    for (const selected of this.sources) {
+      if (!shouldContinue() || !this.state.active.length) break;
+      const known=this.channels.get(selected.channel_id);
+      if (!known || Number(known.type)===FORUM_TYPE) continue;
+      try {
+        const current=await this.client.getChannel(selected.channel_id);
+        if (channelId(current)!==selected.channel_id ||
+            (current.guild_id && String(current.guild_id)!==selected.guild_id)) {
+          this.report({status:'degraded',gap:true,reason:'snapshot_identity_mismatch'}); continue;
+        }
+        const channel=O.normalizeChannel({...current,guild_id:selected.guild_id});
+        const source=O.deriveSourceIdentity(channel,this.client.user);
+        const messages=Array.isArray(current.messages)?current.messages:[];
+        const previous=this.snapshotVersions.get(selected.channel_id)||new Map();
+        const versions=new Map();
+        for (const message of messages) {
+          if (!O.completeEventMessage(message) ||
+              (message.channel_id && String(message.channel_id)!==selected.channel_id) ||
+              (message.guild_id && String(message.guild_id)!==selected.guild_id)) continue;
+          const id=String(message.id);
+          const version=JSON.stringify([message.edited_timestamp,message.content,message.attachments,message.embeds]);
+          versions.set(id,version);
+          if (previous.get(id)===version) continue;
+          this.emit(O.messageObservation(channel,message,source));
+          this.report({last_observation:new Date().toISOString()});
+        }
+        this.snapshotVersions.set(selected.channel_id,versions);
+        this.report({last_interaction:new Date().toISOString()});
+      } catch {
+        this.report({status:'degraded',gap:true,reason:'snapshot_reconciliation_failed'});
+      }
+    }
   }
   drain() {return this.chain;}
   async stop() {
