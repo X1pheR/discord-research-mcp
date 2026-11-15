@@ -3,7 +3,7 @@
 The published reference image is:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.7
+ghcr.io/x1pher/discord-research-mcp:v0.5.8
 ```
 
 The repository `compose.yaml` runs one `discord-research` service. It expects an existing msgvault writer on a shared Docker network. Together those are the reference **two-container product topology**.
@@ -15,7 +15,7 @@ msgvault is not defined in this repository because it is a separate product with
 | Component | Tested / supported baseline |
 | --- | --- |
 | Container platform | Docker Engine with Docker Compose v2 on Linux |
-| Discord Research image | `ghcr.io/x1pher/discord-research-mcp:v0.5.7` |
+| Discord Research image | `ghcr.io/x1pher/discord-research-mcp:v0.5.8` |
 | Image architecture | `linux/amd64` |
 | Runtime inside image | Node.js 22 |
 | Discord provider | Discord Desktop local RPC/IPC with OAuth2 scopes `rpc,identify,guilds,messages.read` |

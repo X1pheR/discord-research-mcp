@@ -5,7 +5,7 @@ networks:
 
 services:
   discord-research:
-    image: ghcr.io/x1pher/discord-research-mcp:v0.5.7
+    image: ghcr.io/x1pher/discord-research-mcp:v0.5.8
     container_name: discord-research
     restart: unless-stopped
     command: [serve]

@@ -29,7 +29,7 @@ It deliberately does **not** own a msgvault writer, archive database, reverse pr
 
 | Component | Tested baseline |
 | --- | --- |
-| Discord Research MCP release | `v0.5.7` |
+| Discord Research MCP release | `v0.5.8` |
 | Container platform | Docker Engine + Docker Compose v2 on Linux |
 | Published image | `linux/amd64` |
 | Runtime | Node.js 22 |
@@ -95,7 +95,7 @@ Archive presence never upgrades evidence to “complete history”. An archive m
 Versioned images are published to GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.7
+ghcr.io/x1pher/discord-research-mcp:v0.5.8
 ```
 
 The Git tag, package version, MCP server version and image tag use the same release version.
@@ -197,6 +197,8 @@ Because Discord Desktop RPC can acknowledge message subscriptions without delive
 
 Docker invocation, importer scheduling, acknowledgement cleanup, host storage paths, backup wiring and recovery policy remain deployment-owned rather than product-owned.
 
+The internal `/acquisition-healthz` endpoint reports only `ok` (HTTP 200) or `degraded` (HTTP 503), based on collector and importer status files. It is intended for an existing synthetic monitor to alert when acquisition stalls, independently from `/healthz`, which continues to report MCP transport availability. No message content or tokens are returned.
+
 ## Security model
 
 The main guarantees are:
@@ -240,9 +242,9 @@ User-visible changes are summarized in [`CHANGELOG.md`](CHANGELOG.md).
 A release is accepted only when the package version, MCP server version, Git tag and GHCR tag agree and the repository verification gate passes.
 
 ```text
-package:   0.5.7
-Git tag:   v0.5.7
-image:     ghcr.io/x1pher/discord-research-mcp:v0.5.7
+package:   0.5.8
+Git tag:   v0.5.8
+image:     ghcr.io/x1pher/discord-research-mcp:v0.5.8
 ```
 
 Deployment-specific msgvault versions, source selections, credentials, reverse proxies and backup policies are independent concerns and are not embedded in the image.

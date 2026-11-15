@@ -1,6 +1,6 @@
 # Security and provider boundary
 
-Discord Research MCP is intentionally read-only, but “read-only” does not mean every internal process is a separate trust boundary. This document describes the actual v0.5.7 reference topology.
+Discord Research MCP is intentionally read-only, but “read-only” does not mean every internal process is a separate trust boundary. This document describes the actual v0.5.8 reference topology.
 
 ## Reference trust model
 
