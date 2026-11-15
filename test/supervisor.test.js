@@ -27,3 +27,30 @@ test('SDD-DLE-017 stalled unsubscribe cannot block shutdown', {timeout:200}, asy
  await S.run({sources:[{guild_id:'700',channel_id:'800'}],connect:async()=>p,emit:()=>{},health:()=>{},stopped,cleanupTimeout:20,wait:async()=>{stopped.value=true;}});
  assert.equal(destroyed,true);
 });
+
+test('SDD-DLE-019 bounded selected-channel reconciliation imports new/edited snapshots once',async()=>{
+ const {EventEmitter}=require('node:events');
+ const {Session}=require('../src/forward');
+ const client=new EventEmitter(),observations=[],states=[];
+ client.user={id:'999'};
+ client.getGuilds=async()=>[{id:'700'}];
+ let body='first';
+ client.getChannels=async()=>[{id:'800',guild_id:'700',type:0}];
+ client.getChannel=async()=>({id:'800',guild_id:'700',type:0,messages:[
+  {id:'900',channel_id:'800',guild_id:'700',timestamp:'2026-11-15T17:00:00Z',author:{id:'901'},content:body,type:0,attachments:[],embeds:[],edited_timestamp:body==='first'?null:'2026-11-15T17:01:00Z'},
+ ]});
+ client.subscribe=async()=>({unsubscribe:async()=>{}});
+ const session=new Session(client,[{guild_id:'700',channel_id:'800'}],x=>observations.push(x),x=>states.push(x));
+ await session.start();
+ await session.reconcileSnapshots();
+ assert.equal(observations.length,1);
+ assert.equal(observations[0].message.content,'first');
+ await session.reconcileSnapshots();
+ assert.equal(observations.length,1);
+ body='edited';
+ await session.reconcileSnapshots();
+ assert.equal(observations.length,2);
+ assert.equal(observations[1].message.content,'edited');
+ assert.equal(states.at(-1).last_observation!==null,true);
+ await session.stop();
+});

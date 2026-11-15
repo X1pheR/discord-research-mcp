@@ -29,7 +29,7 @@ It deliberately does **not** own a msgvault writer, archive database, reverse pr
 
 | Component | Tested baseline |
 | --- | --- |
-| Discord Research MCP release | `v0.5.6` |
+| Discord Research MCP release | `v0.5.7` |
 | Container platform | Docker Engine + Docker Compose v2 on Linux |
 | Published image | `linux/amd64` |
 | Runtime | Node.js 22 |
@@ -95,7 +95,7 @@ Archive presence never upgrades evidence to “complete history”. An archive m
 Versioned images are published to GitHub Container Registry:
 
 ```text
-ghcr.io/x1pher/discord-research-mcp:v0.5.6
+ghcr.io/x1pher/discord-research-mcp:v0.5.7
 ```
 
 The Git tag, package version, MCP server version and image tag use the same release version.
@@ -193,6 +193,8 @@ A selected forum parent may admit only provider-validated child thread channels 
 
 `forward` writes private version-1 JSONL observations. A deployment may import them through msgvault's `import-discord-observations` path, but it must preserve msgvault's single-writer contract.
 
+Because Discord Desktop RPC can acknowledge message subscriptions without delivering events, the forward process also reconciles bounded **current** `GET_CHANNEL` snapshots of exactly selected, non-forum channels every two minutes. It emits new or edited complete messages, skips unchanged messages within a running session, and replays recent snapshots safely across restarts through the archive's idempotent import. This is not historical pagination, full-history recovery, a second archive writer, or deletion inference. Unsupported forum-child history and periods outside the current RPC snapshot remain explicit coverage gaps. Reconciliation never requests unselected channel content or downloads attachments.
+
 Docker invocation, importer scheduling, acknowledgement cleanup, host storage paths, backup wiring and recovery policy remain deployment-owned rather than product-owned.
 
 ## Security model
@@ -238,9 +240,9 @@ User-visible changes are summarized in [`CHANGELOG.md`](CHANGELOG.md).
 A release is accepted only when the package version, MCP server version, Git tag and GHCR tag agree and the repository verification gate passes.
 
 ```text
-package:   0.5.6
-Git tag:   v0.5.6
-image:     ghcr.io/x1pher/discord-research-mcp:v0.5.6
+package:   0.5.7
+Git tag:   v0.5.7
+image:     ghcr.io/x1pher/discord-research-mcp:v0.5.7
 ```
 
 Deployment-specific msgvault versions, source selections, credentials, reverse proxies and backup policies are independent concerns and are not embedded in the image.

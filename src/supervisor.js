@@ -7,7 +7,15 @@ async function cleanup(operation,ms){
  try{await Promise.race([operation(),new Promise(resolve=>{timer=setTimeout(resolve,ms);})]);}catch{}finally{clearTimeout(timer);}
 }
 async function wait(client,session,stopped){
- while(!stopped.value&&session.state.active.length&&Date.now()<client.sessionExpiresAt){session.report({});await pause(10000);}
+ let lastReconciliation=0;
+ while(!stopped.value&&session.state.active.length&&Date.now()<client.sessionExpiresAt){
+  if(Date.now()-lastReconciliation>=120000){
+   await session.reconcileSnapshots();
+   lastReconciliation=Date.now();
+  }
+  session.report({});
+  await pause(10000);
+ }
 }
 async function run(options){
  const {sources,connect,emit,health,stopped}=options;
