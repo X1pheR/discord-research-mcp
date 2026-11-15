@@ -6,11 +6,14 @@ function healthy(collector,archive,now=Date.now()){
   (Number.isFinite(Date.parse(collector.last_interaction)) && now-Date.parse(collector.last_interaction)<300000);
  return Boolean(fresh(collector)&&fresh(archive)&&interactionFresh&&collector.status==='subscribed'&&archive.status==='ready'&&collector.selected?.length&&JSON.stringify(collector.selected)===JSON.stringify(collector.active));
 }
-module.exports={healthy};
+function healthyFiles(collectorFile,archiveFile,now=Date.now()){
+ try {
+  const collector=JSON.parse(fs.readFileSync(collectorFile,'utf8'));
+  const archive=JSON.parse(fs.readFileSync(archiveFile,'utf8'));
+  return healthy(collector,archive,now);
+ } catch {return false;}
+}
+module.exports={healthy,healthyFiles};
 if(require.main===module){
- try{
-  const c=JSON.parse(fs.readFileSync(process.env.DISCORD_HEALTH_FILE,'utf8'));
-  const a=JSON.parse(fs.readFileSync(process.env.DISCORD_IMPORT_HEALTH_FILE,'utf8'));
-  process.exitCode=healthy(c,a)?0:1;
- }catch{process.exitCode=1;}
+ process.exitCode=healthyFiles(process.env.DISCORD_HEALTH_FILE,process.env.DISCORD_IMPORT_HEALTH_FILE)?0:1;
 }

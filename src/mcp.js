@@ -51,7 +51,7 @@ function toolResult(response, fallbackError) {
 }
 
 function buildServer({ controlSocketPath, archiveSocketPath }) {
-  const server = new McpServer({ name: 'discord-research-mcp', version: '0.5.7' });
+  const server = new McpServer({ name: 'discord-research-mcp', version: '0.5.8' });
 
   server.registerTool('read_channel', {
     description: 'Read one explicit account-visible Discord channel through the authorized local Discord RPC session. Returns one bounded current client snapshot; never persists, subscribes, downloads attachment binaries, or claims full history.',
@@ -131,6 +131,11 @@ async function runMcpServer({ controlSocketPath, archiveSocketPath, host, port, 
       live_rpc: live,
       archive,
     });
+  });
+  app.get('/acquisition-healthz', (_req, res) => {
+    const {healthyFiles}=require('./health');
+    const ok=healthyFiles(process.env.DISCORD_HEALTH_FILE,process.env.DISCORD_IMPORT_HEALTH_FILE);
+    res.status(ok?200:503).json({status:ok?'ok':'degraded'});
   });
   app.post('/mcp', async (req, res) => {
     const server = buildServer({ controlSocketPath, archiveSocketPath });
